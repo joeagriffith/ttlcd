@@ -1,0 +1,105 @@
+#!/usr/bin/env bash
+# ttlcd — lifecycle CLI for the Thermaltake LCD panel daemon (paneld).
+#
+#   ttlcd up        install + start the daemon (systemd user service; survives logout)
+#   ttlcd down      stop the daemon
+#   ttlcd restart   restart it (also: `reload`)
+#   ttlcd status    show service + panel health
+#   ttlcd logs [N]  tail the last N log lines (default 50; `-f` to follow)
+#
+# Backed by a systemd *user* service so it keeps running after you close this
+# terminal and auto-restarts if it ever crashes. Falls back to a detached
+# process if systemd --user isn't available.
+set -uo pipefail
+
+PROJ="/home/joe/projects/ttlcd"
+PANELD="$PROJ/.venv/bin/paneld"
+ARGS="--idle system --rotate 5"
+UNIT_DIR="$HOME/.config/systemd/user"
+UNIT="$UNIT_DIR/paneld.service"
+URL="http://127.0.0.1:8770"
+
+has_systemd() { command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; }
+
+install_unit() {
+  mkdir -p "$UNIT_DIR"
+  cat > "$UNIT" <<EOF
+[Unit]
+Description=Thermaltake LCD panel daemon (ttlcd)
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=$PANELD $ARGS
+WorkingDirectory=$PROJ
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+EOF
+  systemctl --user daemon-reload
+}
+
+health() { curl -s --max-time 2 "$URL/health" 2>/dev/null; }
+
+wait_health() {
+  for _ in $(seq 1 25); do
+    health | grep -q '"ok":true' && return 0
+    sleep 1
+  done
+  return 1
+}
+
+case "${1:-}" in
+  up|start)
+    if has_systemd; then
+      install_unit
+      systemctl --user enable --now paneld.service
+    else
+      echo "systemd --user unavailable; launching detached process"
+      setsid nohup "$PANELD" $ARGS >"$PROJ/paneld.log" 2>&1 & disown || true
+    fi
+    if wait_health; then
+      echo "ttlcd is up:"; health; echo
+      echo "(panel may take ~15s more to finish connecting to the LCD; check 'ttlcd status')"
+    else
+      echo "ttlcd: API did not come up — see 'ttlcd logs'"; exit 1
+    fi
+    ;;
+  down|stop)
+    if has_systemd && systemctl --user cat paneld.service >/dev/null 2>&1; then
+      systemctl --user stop paneld.service
+    fi
+    pkill -f "$PANELD $ARGS" 2>/dev/null
+    echo "ttlcd is down."
+    ;;
+  restart|reload)
+    if has_systemd; then
+      install_unit
+      systemctl --user restart paneld.service
+    else
+      "$0" down; sleep 2; "$0" up; exit $?
+    fi
+    if wait_health; then echo "ttlcd restarted:"; health; echo; else echo "ttlcd: did not come back — see 'ttlcd logs'"; exit 1; fi
+    ;;
+  status)
+    if has_systemd; then systemctl --user --no-pager status paneld.service 2>/dev/null | head -n 12; fi
+    echo "--- panel health ---"
+    h="$(health)"; [ -n "$h" ] && echo "$h" || echo "(API not responding — try 'ttlcd up')"
+    echo
+    ;;
+  logs)
+    n="${2:-50}"
+    if has_systemd && systemctl --user cat paneld.service >/dev/null 2>&1; then
+      if [ "$n" = "-f" ]; then journalctl --user -u paneld.service -f
+      else journalctl --user -u paneld.service -n "$n" --no-pager; fi
+    else
+      tail -n "${n/-f/50}" "$PROJ/paneld.log"
+    fi
+    ;;
+  *)
+    echo "usage: ttlcd {up|down|restart|status|logs [N|-f]}"
+    exit 1
+    ;;
+esac
