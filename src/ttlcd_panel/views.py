@@ -595,3 +595,170 @@ class MascotView(View):
         # else: brief empty beat before looping
 
         return c.finish(blur=2)
+
+
+# ---------------------------------------------------------------------------
+class OutcomeView(View):
+    """Final-outcome screen for a finished/crashed run. Two modes keyed on
+    ``ctx.run["status"]``: a green celebratory COMPLETE card (with a few
+    classy animated sparkles) and a red alarm CRASHED card."""
+
+    name = "outcome"
+
+    BAD = (235, 80, 80)
+
+    @staticmethod
+    def _elapsed(run):
+        try:
+            dt = float(run.get("updated_at", 0)) - float(run.get("started_at", 0))
+        except (TypeError, ValueError):
+            return None
+        if dt < 0 or dt != dt:
+            return None
+        m, s = divmod(int(dt), 60)
+        return "%d:%02d" % (m, s)
+
+    @staticmethod
+    def _trunc(c, s, fnt, max_w):
+        s = str(s)
+        if c.textlen(s, fnt) <= max_w:
+            return s
+        while s and c.textlen(s + "…", fnt) > max_w:
+            s = s[:-1]
+        return s + "…"
+
+    def _owner_project(self, c, run, fnt, max_w):
+        owner = str(run.get("owner", "") or "").strip()
+        project = str(run.get("project", "run") or "run").strip()
+        if owner:
+            return self._trunc(c, "%s · %s" % (owner, project), fnt, max_w)
+        return self._trunc(c, project, fnt, max_w)
+
+    def _metric_pairs(self, run):
+        """Ordered (LABEL, value-str) for loss, acc, then up to 2 extras."""
+        metrics = run.get("metrics") or {}
+        pairs = []
+        loss = metrics.get("loss")
+        if loss is not None:
+            pairs.append(("LOSS", _fmt_num(loss)))
+        acc = metrics.get("acc", metrics.get("accuracy"))
+        if acc is not None:
+            pairs.append(("ACC", _fmt_num(acc)))
+        skip = {"loss", "acc", "accuracy"}
+        for k, v in metrics.items():
+            if len(pairs) >= 4:
+                break
+            if k in skip or not isinstance(v, (int, float)):
+                continue
+            pairs.append((k.upper()[:6], _fmt_num(v)))
+        return pairs
+
+    def render(self, ctx):
+        run = ctx.run or {}
+        f = ctx.frame
+        failed = str(run.get("status", "")) == "failed"
+        accent = self.BAD if failed else GOOD
+
+        c = self._canvas(bg=(6, 8, 14))
+        if failed:
+            c.gradient((18, 7, 9), (10, 6, 10))
+        else:
+            c.gradient((6, 14, 12), (10, 18, 22))
+
+        f_head = font(34, bold=True)
+        f_big = font(30, bold=True)
+        f_lbl = font(10, bold=True)
+        f_sm = font(11, bold=False)
+        f_unit = font(13, bold=True)
+
+        # accent strip on the left, gently pulsing
+        pulse = 0.6 + 0.4 * abs(math.sin(f / 9.0))
+        c.rect([0, 0, 5, H], fill=tuple(int(v * pulse) for v in accent), glow=True)
+
+        epochs = run.get("epochs")
+        epoch = int(run.get("epoch", 0) or 0)
+        elapsed = self._elapsed(run)
+        pairs = self._metric_pairs(run)
+
+        # rotation badge (top-right) when cycling several finished runs
+        rot = run.get("_rotation")
+        right_edge = W - 10
+        try:
+            rc, rt = int(rot[0]), int(rot[1])
+        except (TypeError, ValueError, IndexError):
+            rc = rt = 0
+        if rt > 1:
+            badge = "▸ %d/%d" % (rc, rt)
+            bw = c.textlen(badge, f_lbl)
+            c.text((right_edge - bw, 3), badge, f_lbl, DIM)
+
+        # --- headline -------------------------------------------------------
+        if failed:
+            head = "✕ CRASHED"
+        else:
+            head = "✓ COMPLETE"
+        glow_col = tuple(int(v * (0.7 + 0.3 * pulse)) for v in accent) \
+            if failed else WHITE
+        c.text((14, 6), head, f_head, glow_col, glow=True)
+
+        # owner · project (under headline)
+        op = self._owner_project(c, run, f_sm, W - 26)
+        c.text((14, 46), op, f_sm, DIM)
+
+        if failed:
+            # where it died
+            where = "epoch %d/%s" % (epoch + 1, epochs if epochs else "?")
+            c.text((14, 64), "DIED AT", f_lbl, self.BAD)
+            wl = c.textlen("DIED AT", f_lbl)
+            c.text((18 + wl, 62), where, f_unit, WHITE)
+        else:
+            # epoch / elapsed summary line
+            done = "%d epochs" % (epochs if epochs else epoch + 1)
+            summ = done
+            if elapsed:
+                summ += "   ·   " + elapsed
+            c.text((14, 64), "FINISHED", f_lbl, GOOD)
+            fl = c.textlen("FINISHED", f_lbl)
+            c.text((18 + fl, 62), summ, f_unit, WHITE)
+
+        # --- final metrics row ---------------------------------------------
+        my = 84
+        mx = 14
+        if pairs:
+            for label, val in pairs:
+                c.text((mx, my + 2), label, f_lbl, accent)
+                lw = c.textlen(label, f_lbl)
+                vx = mx + lw + 5
+                c.text((vx, my), val, f_unit, WHITE, glow=not failed)
+                vw = c.textlen(val, f_unit)
+                mx = vx + vw + 18
+                if mx > W - 60:
+                    break
+        else:
+            c.text((mx, my), "no metrics", f_sm, DIM)
+
+        # --- footer ---------------------------------------------------------
+        if failed:
+            hint = "check logs ›"
+            hw = c.textlen(hint, f_sm)
+            blink = 0.5 + 0.5 * math.sin(f / 6.0)
+            hc = tuple(int(v * (0.55 + 0.45 * blink)) for v in self.BAD)
+            c.text((14, H - 16), hint, f_sm, hc, glow=True)
+        else:
+            foot = []
+            foot.append("%d epochs" % (epochs if epochs else epoch + 1))
+            if elapsed:
+                foot.append(elapsed + " elapsed")
+            c.text((14, H - 16), "   ·   ".join(foot), f_sm, DIM)
+
+        # --- celebration sparkles (finished only) --------------------------
+        if not failed:
+            spots = [(360, 22, 4), (412, 50, 3), (446, 18, 5),
+                     (388, 96, 4), (336, 70, 3), (462, 84, 4)]
+            for i, (sx, sy, sr) in enumerate(spots):
+                tw = 0.5 + 0.5 * math.sin(f / 5.0 + i * 1.7)
+                if tw > 0.55:
+                    col = tuple(int(v * (0.5 + 0.5 * tw)) for v in GOOD)
+                    c.sparkle(sx, sy, sr * (0.6 + 0.4 * tw), col)
+
+        return c.finish(blur=2)

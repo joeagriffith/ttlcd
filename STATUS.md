@@ -22,7 +22,7 @@ daemon reconnects automatically.
 A daemon that **owns the LCD panel** and lets any agent/app push visualizations:
 **system monitor** (CPU + RTX 4090), **live ML training dashboard**, **messages**, and a
 **Claude mascot**. Talk to it via a localhost **HTTP API** or the **`Panel` Python SDK**
-(wandb-style `init()/log()`). Install/usage: see `README.md`; endpoints: `API.md`.
+(wandb-style `init()/log()`). Install/usage: see `README.md`; endpoints: `docs/API.md`.
 
 ---
 
@@ -33,7 +33,7 @@ A daemon that **owns the LCD panel** and lets any agent/app push visualizations:
 - ✅ `Panel` SDK — resilient, no-op if daemon down (`client.py`)
 - ✅ ViewManager priority engine (`manager.py`), FastAPI server incl. `/issue` (`server.py`)
 - ✅ Daemon `paneld` — supervisor auto-(re)connects on plug, recovers wedges (`daemon.py`)
-- ✅ `panel` CLI, README, API.md, systemd unit, demo script
+- ✅ `panel` CLI, README, docs/API.md, systemd unit, demo script
 - ✅ Offline end-to-end integration test — **passed, 0 bugs**
 - ✅ Robustness audit + fixes: stale-thread join on reconnect, `reset_usb` os-import, NaN/Inf metrics no longer 500, stale run_id guard
 - ✅ **Multi-agent support**: owner-tagged runs + dashboard rotates between concurrent runs every 5s (each labeled by owner); `GET /runs`; `Panel(owner=...)`/`$PANEL_OWNER` — validated live on hardware with 2 concurrent runs

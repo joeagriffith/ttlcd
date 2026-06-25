@@ -32,6 +32,7 @@ class ViewManager:
         self.views = {
             "system": views_mod.SystemView(),
             "training": views_mod.TrainingView(),
+            "outcome": views_mod.OutcomeView(),
             "message": views_mod.MessageView(),
             "mascot": views_mod.MascotView(),
         }
@@ -42,8 +43,13 @@ class ViewManager:
             self._frame += 1
             self._expire()
             name = self._active_name()
-            view = self.views.get(name, self.views["system"])
             run = self._select_run() if name == "training" else None
+            # A finished/crashed run (lingering in its grace window) shows the
+            # celebratory/alarm outcome screen instead of the live dashboard.
+            if name == "training" and run and run.get("status") in ("finished", "failed"):
+                view = self.views["outcome"]
+            else:
+                view = self.views.get(name, self.views["system"])
             ctx = SimpleNamespace(
                 frame=self._frame,
                 t=time.time(),

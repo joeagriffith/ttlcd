@@ -1,29 +1,24 @@
-# ttlcd-panel daemon — systemd USER service
+# ttlcd-panel daemon — systemd USER service (canonical unit).
 #
-# This is a per-user unit (run with `systemctl --user`, NOT system-wide).
+# The `ttlcd` CLI installs this automatically: `ttlcd up` copies it to
+# ~/.config/systemd/user/, enables, and starts it. Manage with
+# `ttlcd up|down|restart|status|logs`. This file is the single source of truth
+# for the unit definition.
 #
-# Install:
+# Manual install (equivalent to `ttlcd up`):
 #   mkdir -p ~/.config/systemd/user
 #   cp /home/joe/projects/ttlcd/packaging/paneld.service ~/.config/systemd/user/
-#   systemctl --user daemon-reload
-#   systemctl --user enable --now paneld
+#   systemctl --user daemon-reload && systemctl --user enable --now paneld
 #
-# Run without an active login session (e.g. headless / after reboot):
-#   loginctl enable-linger joe
-#
-# Inspect / control:
-#   systemctl --user status paneld
-#   journalctl --user -u paneld -f
-#   systemctl --user restart paneld
+# Run without an active login session (headless / after reboot): loginctl enable-linger joe
 
 [Unit]
-Description=ttlcd-panel daemon (Thermaltake 3.9" Bar LCD)
-After=network-online.target
-Wants=network-online.target
+Description=Thermaltake LCD panel daemon (ttlcd)
+After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/home/joe/projects/ttlcd/.venv/bin/paneld
+ExecStart=/home/joe/projects/ttlcd/.venv/bin/paneld --idle system --rotate 5
 WorkingDirectory=/home/joe/projects/ttlcd
 Restart=always
 RestartSec=3

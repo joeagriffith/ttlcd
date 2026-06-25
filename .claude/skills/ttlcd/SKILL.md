@@ -84,4 +84,4 @@ Or append to `/home/joe/projects/ttlcd/ISSUES.md`.
 - The SDK swallows all errors and no-ops if the daemon is down; it never stalls
   or crashes your training loop.
 - Install once: `uv pip install -e /home/joe/projects/ttlcd`.
-- More: `/home/joe/projects/ttlcd/README.md` and `/home/joe/projects/ttlcd/API.md`.
+- More: `/home/joe/projects/ttlcd/README.md` and `/home/joe/projects/ttlcd/docs/API.md`.

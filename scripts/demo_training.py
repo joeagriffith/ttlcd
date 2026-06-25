@@ -47,6 +47,8 @@ def parse_args(argv=None) -> argparse.Namespace:
     p.add_argument("--url", default="http://127.0.0.1:8770", help="daemon URL")
     p.add_argument("--dry", action="store_true",
                    help="single fast batch, no sleep (smoke test)")
+    p.add_argument("--crash", action="store_true",
+                   help="simulate a crash partway through (shows the CRASHED screen)")
     return p.parse_args(argv)
 
 
@@ -65,30 +67,38 @@ def main(argv=None) -> int:
     sleep = 0.0 if args.dry else args.sleep
     total = max(1, epochs * batches)
 
-    # Constructing the Panel starts a run on the daemon (or no-ops if it's down).
-    with Panel(
-        project="demo-training",
-        epochs=epochs,
-        steps_per_epoch=batches,
-        url=args.url,
-        quiet=False,  # show the "daemon unreachable" warning once if down
-    ) as p:
-        p.message("starting demo run 🚀", level="info")
-        step = 0
-        for epoch in range(epochs):
-            for batch in range(batches):
-                progress = (step + 1) / total
-                loss, acc = fake_metrics(progress)
-                p.log(
-                    {"loss": round(loss, 4), "acc": round(acc, 4)},
-                    epoch=epoch,
-                    batch=batch,
-                    step=step,
-                )
-                step += 1
-                if sleep:
-                    time.sleep(sleep)
-        p.message("training complete ✅", level="info")
+    step = 0
+    try:
+        # Constructing the Panel starts a run on the daemon (or no-ops if down).
+        # The context manager finishes the run on exit — marking it "failed" (→
+        # the CRASHED screen) if an exception propagates out of the block.
+        with Panel(
+            project="demo-training",
+            epochs=epochs,
+            steps_per_epoch=batches,
+            url=args.url,
+            quiet=False,  # show the "daemon unreachable" warning once if down
+        ) as p:
+            p.message("starting demo run 🚀", level="info")
+            for epoch in range(epochs):
+                for batch in range(batches):
+                    progress = (step + 1) / total
+                    loss, acc = fake_metrics(progress)
+                    p.log(
+                        {"loss": round(loss, 4), "acc": round(acc, 4)},
+                        epoch=epoch,
+                        batch=batch,
+                        step=step,
+                    )
+                    step += 1
+                    if args.crash and progress > 0.55:
+                        raise RuntimeError("simulated CUDA out of memory 💥")
+                    if sleep:
+                        time.sleep(sleep)
+            p.message("training complete ✅", level="info")
+    except RuntimeError as e:
+        print(f"run crashed (simulated): {e}")
+        return 1
 
     # __exit__ calls p.finish() for us.
     print(f"done: {epochs} epochs x {batches} batches = {step} steps.")

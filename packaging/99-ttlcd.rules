@@ -1,0 +1,8 @@
+# Thermaltake 3.9" Bar Type TFT LCD Display Module-B (264a:233d)
+# Grants non-root access so paneld can talk to the panel over raw USB.
+#
+# Install:
+#   sudo cp packaging/99-ttlcd.rules /etc/udev/rules.d/99-ttlcd.rules
+#   sudo udevadm control --reload-rules && sudo udevadm trigger
+# Then replug the panel (or reboot) for it to take effect.
+SUBSYSTEM=="usb", ATTRS{idVendor}=="264a", ATTRS{idProduct}=="233d", MODE="0666"

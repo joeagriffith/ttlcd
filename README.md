@@ -151,7 +151,7 @@ Claude agents on this machine get a ready-made guide via the
 
 ### HTTP API (curl)
 
-Full reference: [`API.md`](API.md). Quick examples:
+Full reference: [`docs/API.md`](docs/API.md). Quick examples:
 
 ```bash
 # Health
@@ -200,4 +200,4 @@ curl -s -X POST http://127.0.0.1:8770/run/finish \
 
 - Current build state: [`STATUS.md`](STATUS.md)
 - Known issues / bug log: [`ISSUES.md`](ISSUES.md)
-- Internals & module contracts: [`ARCHITECTURE.md`](ARCHITECTURE.md)
+- Internals & module contracts: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)

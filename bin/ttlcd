@@ -22,22 +22,9 @@ URL="http://127.0.0.1:8770"
 has_systemd() { command -v systemctl >/dev/null 2>&1 && systemctl --user show-environment >/dev/null 2>&1; }
 
 install_unit() {
+  # The canonical unit lives in packaging/ (single source of truth).
   mkdir -p "$UNIT_DIR"
-  cat > "$UNIT" <<EOF
-[Unit]
-Description=Thermaltake LCD panel daemon (ttlcd)
-After=graphical-session.target
-
-[Service]
-Type=simple
-ExecStart=$PANELD $ARGS
-WorkingDirectory=$PROJ
-Restart=always
-RestartSec=3
-
-[Install]
-WantedBy=default.target
-EOF
+  cp "$PROJ/packaging/paneld.service" "$UNIT"
   systemctl --user daemon-reload
 }
 
