@@ -1,5 +1,6 @@
 """Rendering toolkit for 480x128 frames: cached fonts + a Canvas with the
 glow / bar / text helpers shared by every view."""
+import colorsys
 import math
 import os
 
@@ -33,7 +34,6 @@ def font(size, bold=True):
 
 
 def hsv(h, s=1.0, v=1.0):
-    import colorsys
     r, g, b = colorsys.hsv_to_rgb(h % 1.0, s, v)
     return (int(r * 255), int(g * 255), int(b * 255))
 

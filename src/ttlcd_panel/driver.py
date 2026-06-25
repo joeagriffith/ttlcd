@@ -248,7 +248,8 @@ class Main(threading.Thread):
                     time.sleep(0.1)
                     continue
                 self._stream(self.image_path)
-                GLOBAL_STAT = True
+                if self.running:            # don't poke globals if we were stopped mid-stream
+                    GLOBAL_STAT = True
             else:
                 time.sleep(0.05)
         self.logger.info("Shutdown Main")
@@ -301,8 +302,9 @@ class Trigger(threading.Thread):
         while self.running:
             if 13 <= GLOBAL_INIT_LOCK < 14 and GLOBAL_STAT:
                 self.control.read(16, 2000)
-                GLOBAL_STAT = False
-                GLOBAL_RUNNING = True
+                if self.running:            # a stale survivor must not mark the new connection live
+                    GLOBAL_STAT = False
+                    GLOBAL_RUNNING = True
             time.sleep(0.05)
 
     def shutdown(self):

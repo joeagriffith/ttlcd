@@ -75,9 +75,9 @@ class SystemView(View):
     def render(self, ctx):
         m = ctx.metrics or {}
         f = ctx.frame
-        cpu = m.get("cpu") or {}
-        ram = m.get("ram") or {}
-        gpu = m.get("gpu")  # may be None
+        cpu = m.get("cpu") if isinstance(m.get("cpu"), dict) else {}
+        ram = m.get("ram") if isinstance(m.get("ram"), dict) else {}
+        gpu = m.get("gpu") if isinstance(m.get("gpu"), dict) else None
 
         cpu_pct = float(cpu.get("pct", 0.0) or 0.0)
         per_core = cpu.get("per_core") or []
@@ -198,7 +198,7 @@ class TrainingView(View):
         f = ctx.frame
         run = ctx.run
         m = ctx.metrics or {}
-        gpu = m.get("gpu")
+        gpu = m.get("gpu") if isinstance(m.get("gpu"), dict) else None
 
         c = self._canvas(bg=(6, 8, 14))
         c.gradient((6, 8, 14), (12, 15, 28))
@@ -289,6 +289,8 @@ class TrainingView(View):
                   if k not in skip and isinstance(v, (int, float))][:3]
         ex_x = 8
         for k, v in extras:
+            if ex_x > 300:
+                break
             label = k.upper()[:6]
             c.text((ex_x, 64), label, f_lbl, ACCENT)
             lw = c.textlen(label, f_lbl)
@@ -726,14 +728,14 @@ class OutcomeView(View):
         mx = 14
         if pairs:
             for label, val in pairs:
-                c.text((mx, my + 2), label, f_lbl, accent)
                 lw = c.textlen(label, f_lbl)
                 vx = mx + lw + 5
-                c.text((vx, my), val, f_unit, WHITE, glow=not failed)
                 vw = c.textlen(val, f_unit)
-                mx = vx + vw + 18
-                if mx > W - 60:
+                if vx + vw > W - 12:
                     break
+                c.text((mx, my + 2), label, f_lbl, accent)
+                c.text((vx, my), val, f_unit, WHITE, glow=not failed)
+                mx = vx + vw + 18
         else:
             c.text((mx, my), "no metrics", f_sm, DIM)
 

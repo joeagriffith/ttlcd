@@ -10,11 +10,10 @@
 ---
 
 ## ✅ Recovered
-The panel was replugged and the daemon auto-connected and started streaming within
-~2s (no stall, no errors). The earlier off-bus incident (pyusb `dev.reset()`) is fully
-fixed in code — `reset_usb()` now uses a safe `USBDEVFS_RESET` ioctl that keeps the
-device enumerated, so it can't recur. If the panel ever drops again: replug, and the
-daemon reconnects automatically.
+The earlier off-bus incident (pyusb `dev.reset()`) is fully fixed in code —
+`reset_usb()` now uses a safe `USBDEVFS_RESET` ioctl that keeps the device enumerated,
+so it can't recur. If the panel ever drops: replug, and the daemon reconnects
+automatically (it did exactly that — streaming resumed within ~2s, no errors).
 
 ---
 
@@ -38,13 +37,13 @@ A daemon that **owns the LCD panel** and lets any agent/app push visualizations:
 - ✅ Robustness audit + fixes: stale-thread join on reconnect, `reset_usb` os-import, NaN/Inf metrics no longer 500, stale run_id guard
 - ✅ **Multi-agent support**: owner-tagged runs + dashboard rotates between concurrent runs every 5s (each labeled by owner); `GET /runs`; `Panel(owner=...)`/`$PANEL_OWNER` — validated live on hardware with 2 concurrent runs
 - ✅ **`ttlcd` skill** at `.claude/skills/ttlcd/` (symlinked to `~/.claude/skills/ttlcd`) — every Claude agent auto-learns the panel
-- ✅ **pytest suite: 77 passing** — `cd ~/projects/ttlcd && .venv/bin/python -m pytest`
+- ✅ **Outcome screens**: runs end on a clear ✓ COMPLETE / ✕ CRASHED card
+- ✅ **pytest suite: 79 passing** — `cd ~/projects/ttlcd && .venv/bin/python -m pytest`
 - ✅ Hardware-validated: system monitor, training dashboard, messages, multi-run rotation — all streaming, 0 errors
-- 📋 (optional) `systemctl --user enable --now paneld` for boot auto-start; git commit
 
 ---
 
-## 🚀 Quickstart for the ML agent  *(works the moment the panel is replugged)*
+## 🚀 Quickstart for the ML agent  *(panel is live — logs appear on the glass immediately)*
 ```python
 from ttlcd_panel import Panel
 p = Panel(project="my-model", epochs=30, steps_per_epoch=len(loader))
@@ -53,8 +52,8 @@ for epoch in range(30):
         p.log({"loss": loss.item(), "acc": acc}, epoch=epoch, batch=batch)
 p.finish()
 ```
-You can start integrating NOW — the API accepts and stores everything; it just won't
-be visible on the glass until the replug. Shell: `curl -XPOST localhost:8770/message -d '{"text":"hi"}'`.
+The panel is streaming now — anything you log shows up live on the glass.
+Shell: `curl -XPOST localhost:8770/message -d '{"text":"hi"}'`.
 **Install first:** `cd /home/joe/projects/ttlcd && uv pip install -e .` (see README).
 
 ---
@@ -67,9 +66,9 @@ I triage these every work session.
 ---
 
 ## ⚠️ Testing windows
-Currently I am **not** doing hardware tests (can't — panel is off the bus). When the
-panel returns and I verify, I'll set this line to `🔧 LEAD TESTING`. Your training is
-never affected — the daemon only *reads* GPU counters (negligible CPU, no GPU contention).
+The panel is **live and streaming**. If I run a hardware verification pass I'll flip
+this line to `🔧 LEAD TESTING` so you know. Either way your training is never affected —
+the daemon only *reads* GPU counters (negligible CPU, no GPU contention).
 
 ---
 

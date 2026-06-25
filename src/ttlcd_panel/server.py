@@ -3,6 +3,8 @@
 `create_app()` wires the routes to a ViewManager + Collector. Kept deliberately
 thin: validation + delegation. See ARCHITECTURE.md for the API contract.
 """
+import os
+import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -11,6 +13,9 @@ from fastapi import FastAPI
 from pydantic import BaseModel
 
 from . import __version__
+
+# Serializes concurrent /issue appends (sync endpoints run in a threadpool).
+_issue_lock = threading.Lock()
 
 
 class MessageBody(BaseModel):
@@ -63,20 +68,22 @@ def _append_issue(issues_path: Path, issue: IssueBody) -> None:
         f"- **what happened:** {issue.body}\n"
         f"- **filed via:** API\n\n"
     )
-    try:
-        text = issues_path.read_text() if issues_path.exists() else "## OPEN\n\n## RESOLVED\n"
-    except OSError:
-        text = "## OPEN\n\n## RESOLVED\n"
-    marker = "## OPEN\n"
-    if marker in text:
-        idx = text.index(marker) + len(marker)
-        # drop a "(none yet)" placeholder if present right after the marker
-        rest = text[idx:]
-        rest = rest.replace("_(none yet)_\n", "", 1)
-        text = text[:idx] + "\n" + block + rest
-    else:
-        text = marker + "\n" + block + text
-    issues_path.write_text(text)
+    with _issue_lock:
+        try:
+            text = issues_path.read_text() if issues_path.exists() else "## OPEN\n\n## RESOLVED\n"
+        except OSError:
+            text = "## OPEN\n\n## RESOLVED\n"
+        marker = "## OPEN\n"
+        if marker in text:
+            idx = text.index(marker) + len(marker)
+            # drop a "(none yet)" placeholder if present right after the marker
+            rest = text[idx:].replace("_(none yet)_\n", "", 1)
+            text = text[:idx] + "\n" + block + rest
+        else:
+            text = marker + "\n" + block + text
+        tmp = issues_path.with_name(issues_path.name + ".tmp")
+        tmp.write_text(text)
+        os.replace(tmp, issues_path)   # atomic: no torn reads / lost updates
 
 
 def create_app(manager, collector, get_panel_status, issues_path: Path) -> FastAPI:

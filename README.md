@@ -63,7 +63,7 @@ Or run it directly in the foreground:
 .venv/bin/paneld
 ```
 
-Useful flags (all have env-var equivalents — see `paneld --help`):
+Useful flags (some have env-var equivalents — see `paneld --help`):
 
 | Flag | Default | Purpose |
 |------|---------|---------|
@@ -73,6 +73,7 @@ Useful flags (all have env-var equivalents — see `paneld --help`):
 | `--orientation` | `top` | Physical mounting orientation of the panel |
 | `--no-panel` | off | Run the **API only**, never touch USB (dev/testing) |
 | `--interval` | `1.0` | Metrics poll interval, seconds |
+| `--rotate` | `5` | Seconds per run when rotating the dashboard across concurrent runs |
 | `--log-level` | `INFO` | Logging level |
 
 For headless / always-on operation, install it as a user service — see

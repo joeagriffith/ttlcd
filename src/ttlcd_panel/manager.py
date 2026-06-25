@@ -17,6 +17,20 @@ from . import views as views_mod
 
 HISTORY = 120          # values kept per metric for trend rendering
 RUN_GRACE_S = 20.0     # keep a finished run on screen this long
+STALE_S = 600.0        # evict a run abandoned without finish() (client died) after this long
+MAX_METRIC_KEYS = 64   # cap distinct metric names per run (bound memory)
+
+
+def _finite(obj):
+    """Recursively replace non-finite floats (NaN/Inf) with None so the value can
+    always be JSON-encoded — a NaN anywhere in a run dict would 500 /run and /runs."""
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, dict):
+        return {k: _finite(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_finite(v) for v in obj]
+    return obj
 
 
 class ViewManager:
@@ -85,8 +99,14 @@ class ViewManager:
         now = time.time()
         if self._message and self._message["until"] <= now:
             self._message = None
-        dead = [rid for rid, r in self._runs.items()
-                if r["status"] != "running" and (now - r["updated_at"]) > RUN_GRACE_S]
+        dead = []
+        for rid, r in self._runs.items():
+            age = now - r["updated_at"]
+            if r["status"] != "running":
+                if age > RUN_GRACE_S:
+                    dead.append(rid)
+            elif age > STALE_S:           # abandoned run: client died without finish()
+                dead.append(rid)
         for rid in dead:
             del self._runs[rid]
 
@@ -108,7 +128,7 @@ class ViewManager:
             "steps_per_epoch": int(steps_per_epoch) if steps_per_epoch else None,
             "epoch": 0, "batch": 0, "global_step": 0,
             "metrics": {}, "history": {},
-            "config": config or {},
+            "config": _finite(config or {}),
             "started_at": time.time(), "updated_at": time.time(),
         }
 
@@ -138,6 +158,8 @@ class ViewManager:
     def log_run(self, metrics=None, epoch=None, batch=None, step=None, run_id=None, owner=None):
         with self._lock:
             r = self._resolve_run(run_id, owner)
+            if r["status"] != "running":
+                return                              # late log to a finished/crashed run — ignore
             if owner and r.get("owner") in (None, "agent"):
                 r["owner"] = owner
             if epoch is not None:
@@ -155,12 +177,13 @@ class ViewManager:
                     continue
                 if not math.isfinite(fv):       # NaN/Inf would make JSON encoding 500
                     continue
+                if k not in r["metrics"] and len(r["metrics"]) >= MAX_METRIC_KEYS:
+                    continue                    # bound distinct metric names per run
                 r["metrics"][k] = fv
                 h = r["history"].setdefault(k, [])
                 h.append(fv)
                 if len(h) > HISTORY:
                     del h[0:len(h) - HISTORY]
-            r["status"] = "running"
             r["updated_at"] = time.time()
 
     def finish_run(self, status="finished", run_id=None, owner=None):
@@ -171,7 +194,7 @@ class ViewManager:
             else:
                 running = [x for x in self._runs.values() if x["status"] == "running"]
                 if running:
-                    r = max(running, key=lambda x: x["started_at"])
+                    r = max(running, key=lambda x: x["updated_at"])
             if r:
                 r["status"] = status if status in ("finished", "failed") else "finished"
                 r["updated_at"] = time.time()

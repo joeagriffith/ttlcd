@@ -25,8 +25,8 @@ Daemon + panel liveness.
   "gpu": true
 }
 ```
-- `panel` is one of `"running"`, `"down"`, or `"disabled"` (when started with
-  `--no-panel`).
+- `panel` is one of `"running"`, `"down"`, `"disconnected"` (device absent from
+  the USB bus), or `"disabled"` (when started with `--no-panel`).
 - `gpu` is `true` when a GPU snapshot is available.
 
 ```bash
@@ -245,8 +245,8 @@ Force the idle view.
 ```json
 {"name": "system"}
 ```
-- `name` (string, required) — `"system"` | `"mascot"` (`"training"` per the
-  architecture contract; the CLI exposes `system`/`mascot`).
+- `name` (string, required) — `"system"` | `"mascot"`. These are the only
+  settable idle views.
 
 **Response:**
 ```json

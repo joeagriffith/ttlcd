@@ -81,8 +81,10 @@ case "${1:-}" in
     if has_systemd && systemctl --user cat paneld.service >/dev/null 2>&1; then
       if [ "$n" = "-f" ]; then journalctl --user -u paneld.service -f
       else journalctl --user -u paneld.service -n "$n" --no-pager; fi
+    elif [ "$n" = "-f" ]; then
+      tail -f "$PROJ/paneld.log"
     else
-      tail -n "${n/-f/50}" "$PROJ/paneld.log"
+      tail -n "$n" "$PROJ/paneld.log"
     fi
     ;;
   *)
