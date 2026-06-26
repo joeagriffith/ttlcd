@@ -198,9 +198,11 @@ The current run-state dict, or `{}` when no run is active.
 curl -s http://127.0.0.1:8770/run
 ```
 
-> Note: when several runs are active, `GET /run` returns the one currently on
-> screen (the daemon rotates the dashboard between active runs every 5s). Use
-> `GET /runs` to see all of them.
+> Note: when several runs are active, `GET /run` returns one of them, rotating
+> among **runs** every 5s (its `_rotation` count matches the run dashboard's
+> badge). The physical panel rotates across runs *and* agendas, so at any instant
+> it may be showing an agenda rather than this run — use `GET /runs` for all runs
+> and `GET /agenda` for all agendas.
 
 ---
 
@@ -257,6 +259,77 @@ Force the idle view.
 ```bash
 curl -s -X POST http://127.0.0.1:8770/view \
   -H 'Content-Type: application/json' -d '{"name":"mascot"}'
+```
+
+---
+
+## POST /agenda
+
+Publish an agent's agenda/checklist — a persistent, structured to-do list shown
+on the panel so a human can glance at what an agent has done / is doing / has
+queued. Agendas are keyed by `owner`: a new POST for an owner **replaces** that
+owner's agenda. The panel rotates agendas alongside run dashboards (every 5s)
+and drops an agenda not refreshed within 30 min.
+
+**Request:**
+```json
+{
+  "owner?": null,
+  "title?": "agenda",
+  "items?": [{"task": "load data", "status": "done"}]
+}
+```
+- `owner` (string or null, = `null` → `"agent"`) — whose agenda this is; a later
+  POST for the same owner replaces it. **Set a distinct owner per agent:** agendas
+  are keyed by owner, so two agents that both omit `owner` share (and overwrite)
+  the one default `"agent"` agenda.
+- `title` (string, = `"agenda"`) — heading shown above the checklist.
+- `items` (array, = `[]`) — checklist entries, each `{"task": string, "status":
+  "done" | "doing" | "todo"}`. Unknown statuses coerce to `"todo"`; the list is
+  capped at 64 items. Order is preserved (it's how the checklist reads).
+
+**Response:**
+```json
+{"ok": true, "owner": "trainer-A"}
+```
+
+```bash
+curl -s -X POST http://127.0.0.1:8770/agenda \
+  -H 'Content-Type: application/json' \
+  -d '{"owner":"trainer-A","title":"nightly run","items":[
+        {"task":"load data","status":"done"},
+        {"task":"train model","status":"doing"},
+        {"task":"evaluate","status":"todo"}]}'
+```
+
+---
+
+## GET /agenda
+
+All currently-active agendas (those refreshed within the 30-min stale window).
+
+**Request:** none.
+
+**Response:**
+```json
+{
+  "agendas": [
+    {
+      "owner": "trainer-A", "title": "nightly run",
+      "items": [
+        {"task": "load data", "status": "done"},
+        {"task": "train model", "status": "doing"},
+        {"task": "evaluate", "status": "todo"}
+      ],
+      "updated_at": 1719270012.0
+    }
+  ]
+}
+```
+`agendas` is `[]` when none are active. Sorted by owner (the stable rotation order).
+
+```bash
+curl -s http://127.0.0.1:8770/agenda
 ```
 
 ---

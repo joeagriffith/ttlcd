@@ -66,23 +66,45 @@ API stay fast regardless of how slow a probe is.
 
 ## View selection
 
-`ViewManager._active_name()` resolves the active view by priority:
+`ViewManager._pick_view()` (called by `render()` under the lock) resolves the
+active view by priority:
 
 1. **message** — an unexpired message → `MessageView` (full-screen card,
    default ~5 s).
-2. **run** — one or more active runs → `TrainingView` (the dashboard).
+2. **rotating displays** — one or more active runs and/or agendas → the manager
+   rotates the slot between them (see below). A run renders as `TrainingView`
+   (or `OutcomeView` once finished/crashed); an agenda renders as `AgendaView`.
 3. **idle** — otherwise the configured idle view, `SystemView` (default) or
    `MascotView` (`--idle`, or `POST /view`).
 
-### Multi-run rotation
+`_active_name()` exposes this category (`"message"` / `"training"` / `"agenda"`
+/ idle name) for tests and introspection.
+
+### Rotation: runs + agendas
 
 Runs are keyed by `run_id` and tagged with an `owner`, so concurrent agents
-coexist instead of overwriting one shared run. `_active_runs()` returns every
-run that is `running` or finished within the grace window, sorted by start time
-for a stable order. `_select_run()` picks one by wall-clock time
-(`int(time.time() / rotate_secs) % n`, default `rotate_secs = 5 s`) and stamps
-it with `_rotation = [current, total]` (1-based) so the view can draw a rotation
-badge. `GET /run` returns the run currently on screen; `GET /runs` returns all.
+coexist instead of overwriting one shared run. Agendas (agent to-do checklists)
+are keyed by `owner` — a new `POST /agenda` for an owner replaces that owner's
+agenda. `_select_display()` lines up every eligible run (`running`, or finished
+within the grace window, sorted by start time) followed by every eligible agenda
+(non-empty and refreshed within `AGENDA_STALE_S = 30 min`, sorted by owner), then
+picks one slot by wall-clock time (`int(time.time() / rotate_secs) % n`, default
+`rotate_secs = 5 s`). So a run dashboard and a checklist cycle on the same panel.
+
+Runs and agendas share the slot **equally** — a deliberate choice (the feature
+request asked the panel to "rotate between them"), so heavy agenda use reduces
+each run's share of screen time. Empty agendas are excluded so they can't steal a
+slot for a blank "no items" card. The selected payload is stamped with
+`_rotation = [current, total]` counted **within its own kind** ("run X of N runs"
+/ "agenda X of N agendas"), so a single live run never shows a misleading "1/2"
+just because an agenda is also up. `_active_name()` names the active category by
+delegating to the same `_pick_view()` path, so the rotation maths live in one place.
+
+`GET /run` returns a run (via `_select_run()`, which rotates among runs only — its
+`_rotation` matches the run badge); `GET /runs` returns all runs; `GET /agenda`
+returns all (non-empty) agendas. Because the panel rotates across runs *and*
+agendas, `GET /run` reports an active run, not necessarily the exact payload on
+screen at that instant.
 
 A run that has **finished or crashed** is kept on screen for a grace window
 (`RUN_GRACE_S = 20 s`) before `_expire()` drops it, so its terminal state is
@@ -141,6 +163,22 @@ Non-finite metric values (NaN/Inf) are dropped on log so JSON encoding can't
 
 `until` is an absolute wall-clock expiry; `_expire()` clears it once passed.
 
+### Agenda dict
+
+```python
+{
+  "owner": str, "title": str,
+  "items": [{"task": str, "status": "done" | "doing" | "todo"}, ...],
+  "updated_at": float,
+  # "_rotation": [current, total]   # added by _select_display for the active agenda
+}
+```
+
+Keyed by `owner` (one agenda per owner). `set_agenda()` sanitizes items —
+non-dict entries are dropped, unknown statuses coerce to `"todo"`, tasks are
+stringified, and the list is capped at `MAX_AGENDA_ITEMS = 64`. `_expire()`
+drops an agenda once `updated_at` is older than `AGENDA_STALE_S` (30 min).
+
 ### View `ctx`
 
 A read-only `SimpleNamespace` passed to `View.render(ctx)`:
@@ -149,7 +187,8 @@ A read-only `SimpleNamespace` passed to `View.render(ctx)`:
 ctx.frame    # int, increments every rendered frame
 ctx.t        # float wall-clock seconds (animation / elapsed)
 ctx.metrics  # dict from Collector.snapshot()
-ctx.run      # run-state dict, or None (only set for the training view)
+ctx.run      # run-state dict, or None (only set for the training/outcome view)
+ctx.agenda   # agenda dict, or None (only set for the agenda view)
 ctx.message  # message dict, or None
 ```
 

@@ -51,6 +51,15 @@ class ViewBody(BaseModel):
     name: str
 
 
+class AgendaBody(BaseModel):
+    owner: Optional[str] = None
+    title: str = "agenda"
+    # Untyped items: the manager sanitizes each entry (coerces status, drops
+    # non-dicts) — matching the resilient SDK contract — so a stray non-object
+    # item drops silently instead of 422-ing the whole agenda.
+    items: list[Any] = []
+
+
 class IssueBody(BaseModel):
     title: str
     body: str = ""
@@ -138,6 +147,15 @@ def create_app(manager, collector, get_panel_status, issues_path: Path) -> FastA
     def view(body: ViewBody):
         ok = manager.set_idle_view(body.name)
         return {"ok": ok}
+
+    @app.post("/agenda")
+    def agenda_set(body: AgendaBody):
+        owner = manager.set_agenda(body.owner, body.title, body.items)
+        return {"ok": True, "owner": owner}
+
+    @app.get("/agenda")
+    def agenda_get():
+        return {"agendas": manager.get_agendas()}
 
     @app.post("/issue")
     def issue(body: IssueBody):

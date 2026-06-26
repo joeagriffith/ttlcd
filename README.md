@@ -148,6 +148,8 @@ Claude agents on this machine get a ready-made guide via the
 .venv/bin/panel system                        # latest system/GPU snapshot
 .venv/bin/panel run                           # current run state
 .venv/bin/panel view mascot                   # switch idle view
+.venv/bin/panel agenda --title "nightly" \
+  --item done:"load data" --item doing:"train" --item todo:"evaluate"
 ```
 
 ### HTTP API (curl)
@@ -177,6 +179,14 @@ curl -s -X POST http://127.0.0.1:8770/run/log \
 
 curl -s -X POST http://127.0.0.1:8770/run/finish \
   -H 'Content-Type: application/json' -d '{"status":"finished"}'
+
+# Publish an agent agenda / to-do checklist (rotates with run dashboards)
+curl -s -X POST http://127.0.0.1:8770/agenda \
+  -H 'Content-Type: application/json' \
+  -d '{"owner":"trainer-A","title":"nightly run","items":[
+        {"task":"load data","status":"done"},
+        {"task":"train model","status":"doing"},
+        {"task":"evaluate","status":"todo"}]}'
 ```
 
 ---
@@ -189,8 +199,9 @@ curl -s -X POST http://127.0.0.1:8770/run/finish \
   and GPU (via `pynvml`, falling back to `nvidia-smi`) on an interval and caches
   the latest snapshot — the render path never does any I/O.
 - **A view manager picks what to show**, by priority:
-  **message** (full-screen card, ~5s) > **run** (training dashboard while a run
-  is active / recently finished) > **idle** (system stats or mascot).
+  **message** (full-screen card, ~5s) > **rotating displays** (training
+  dashboards for active runs and agent **agenda** checklists, cycled every 5s) >
+  **idle** (system stats or mascot).
 - **A watchdog auto-recovers USB wedges.** If the panel's render thread dies, the
   daemon resets the USB device and re-initialises the panel; the API stays up the
   whole time.

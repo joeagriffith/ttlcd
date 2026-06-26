@@ -40,6 +40,12 @@ def main(argv=None):
     i.add_argument("--agent", default="cli")
     i.add_argument("--severity", default="medium", choices=["low", "medium", "high"])
 
+    a = sub.add_parser("agenda", help="set an agenda/checklist on the panel")
+    a.add_argument("--owner", default=os.environ.get("PANEL_OWNER", "agent"))
+    a.add_argument("--title", default="agenda")
+    a.add_argument("--item", action="append", default=[], dest="items", metavar="STATUS:TASK",
+                   help="checklist item 'status:task' (status = done|doing|todo); repeatable")
+
     args = p.parse_args(argv)
     try:
         if args.cmd == "msg":
@@ -59,6 +65,17 @@ def main(argv=None):
             _post(args.url, "/issue", {"title": args.title, "body": args.body,
                                        "agent": args.agent, "severity": args.severity})
             print("filed.")
+        elif args.cmd == "agenda":
+            items = []
+            for raw in args.items:
+                status, sep, task = raw.partition(":")
+                # Only treat the prefix as a status when it actually is one, so a
+                # task that itself contains a colon (e.g. a URL) isn't truncated.
+                if not sep or status not in ("done", "doing", "todo"):
+                    status, task = "todo", raw
+                items.append({"task": task, "status": status})
+            _post(args.url, "/agenda", {"owner": args.owner, "title": args.title, "items": items})
+            print("set.")
     except requests.exceptions.RequestException as e:
         print(f"panel: daemon unreachable at {args.url} ({e.__class__.__name__})", file=sys.stderr)
         return 1

@@ -43,7 +43,7 @@ from typing import Any
 
 import requests
 
-__all__ = ["Panel", "init", "message"]
+__all__ = ["Panel", "init", "message", "agenda"]
 
 logger = logging.getLogger("ttlcd_panel.client")
 
@@ -206,6 +206,28 @@ class Panel:
             {"text": text, "duration": duration, "level": level},
         )
 
+    def agenda(self, items: list[dict[str, Any]], title: str = "agenda") -> None:
+        """Publish this owner's agenda/checklist to the panel.
+
+        ``POST /agenda`` with ``{owner, title, items}``. ``items`` is a list of
+        ``{"task": str, "status": "done"|"doing"|"todo"}`` dicts; a later call
+        for the same owner replaces the previous agenda. Never raises.
+
+        Examples
+        --------
+        >>> panel.agenda([
+        ...     {"task": "load data", "status": "done"},
+        ...     {"task": "train model", "status": "doing"},
+        ...     {"task": "evaluate", "status": "todo"},
+        ... ], title="nightly run")
+        """
+        # Best-effort: unlike log()/finish(), a failed agenda POST must NOT put
+        # the Panel into no-op mode — the agenda is auxiliary and must never
+        # silently disable the run's own metric logging.
+        if self._dead:
+            return
+        _post(self.url, "/agenda", {"owner": self.owner, "title": title, "items": items})
+
     def finish(self, status: str = "finished") -> None:
         """Mark the run finished (or ``"failed"``).
 
@@ -266,3 +288,22 @@ def message(
     >>> client.message("build complete", level="info")
     """
     _post(url, "/message", {"text": text, "duration": duration, "level": level})
+
+
+def agenda(
+    owner: str,
+    items: list[dict[str, Any]],
+    title: str = "agenda",
+    url: str = _DEFAULT_URL,
+) -> None:
+    """Publish an agenda/checklist for ``owner`` without an active run.
+
+    ``POST /agenda``. Resilient: swallows all errors, never raises. A later call
+    for the same ``owner`` replaces the previous agenda.
+
+    Examples
+    --------
+    >>> import ttlcd_panel.client as client
+    >>> client.agenda("builder", [{"task": "compile", "status": "doing"}])
+    """
+    _post(url, "/agenda", {"owner": owner, "title": title, "items": items})

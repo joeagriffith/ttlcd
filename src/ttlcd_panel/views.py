@@ -8,6 +8,7 @@ touch hardware, USB, or the network — they only read the cached ``ctx`` dict.
     ctx.t        float   wall-clock seconds (animation / elapsed)
     ctx.metrics  dict    Collector.snapshot() (cpu/ram/gpu/...)
     ctx.run      dict|None  run-state
+    ctx.agenda   dict|None  agenda-state {"owner", "title", "items", "_rotation"?}
     ctx.message  dict|None  {"text", "level", "until"}
 """
 from __future__ import annotations
@@ -24,6 +25,8 @@ ACCENT = (0, 220, 200)
 GOOD = (90, 235, 130)
 DIM = (140, 158, 175)
 WHITE = (235, 240, 245)
+
+OWNER_TAG_MAX = 18      # chars of an owner name shown in a view header tag
 
 
 def _clamp(v, lo=0.0, hi=1.0):
@@ -63,6 +66,35 @@ class View:
     @staticmethod
     def _canvas(bg=(6, 8, 14)):
         return Canvas(bg=bg)
+
+    @staticmethod
+    def _trunc(c, s, fnt, max_w):
+        """Truncate ``s`` to fit ``max_w`` px on canvas ``c``, adding an ellipsis
+        when clipped. Binary-searches the cut point — ~log(len) font measurements
+        instead of one per dropped character (this runs per item, every frame)."""
+        s = str(s)
+        if c.textlen(s, fnt) <= max_w:
+            return s
+        # longest prefix whose "prefix…" still fits (0 -> just "…")
+        lo, hi = 0, len(s)
+        while lo < hi:
+            mid = (lo + hi + 1) // 2
+            if c.textlen(s[:mid] + "…", fnt) <= max_w:
+                lo = mid
+            else:
+                hi = mid - 1
+        return s[:lo] + "…"
+
+    @staticmethod
+    def _rotation_badge(rot):
+        """Parse a ``_rotation = [current, total]`` stamp into a ``"▸ cur/tot"``
+        badge string, or None when there's nothing worth showing (single item or
+        a missing/garbled stamp). Callers draw it however the view styles it."""
+        try:
+            cur, tot = int(rot[0]), int(rot[1])
+        except (TypeError, ValueError, IndexError):
+            return None
+        return "▸ %d/%d" % (cur, tot) if tot > 1 else None
 
 
 # ---------------------------------------------------------------------------
@@ -236,14 +268,9 @@ class TrainingView(View):
 
         # rotation badge (top-right corner) when the dashboard cycles between
         # several concurrent runs. Hidden for a single run / when absent.
-        rot = run.get("_rotation")
-        try:
-            rot_cur, rot_tot = int(rot[0]), int(rot[1])
-        except (TypeError, ValueError, IndexError):
-            rot_cur = rot_tot = 0
         right_edge = W - 8
-        if rot_tot > 1:
-            badge = "▸ %d/%d" % (rot_cur, rot_tot)
+        badge = self._rotation_badge(run.get("_rotation"))
+        if badge:
             bw = c.textlen(badge, f_lbl)
             bx = (W - 5) - bw
             c.rect([bx - 4, 0, W - 1, 13], fill=(16, 30, 38))
@@ -260,7 +287,7 @@ class TrainingView(View):
         avail = right_edge - int(c.textlen(st_up, f_sm)) - 12 - 8
         hx = 8
         if owner:
-            otag = owner[:18]
+            otag = owner[:OWNER_TAG_MAX]
             c.text((hx, 1), otag, f_sm, ACCENT)
             hx += int(c.textlen(otag, f_sm))
             sep = " · "
@@ -620,15 +647,6 @@ class OutcomeView(View):
         m, s = divmod(int(dt), 60)
         return "%d:%02d" % (m, s)
 
-    @staticmethod
-    def _trunc(c, s, fnt, max_w):
-        s = str(s)
-        if c.textlen(s, fnt) <= max_w:
-            return s
-        while s and c.textlen(s + "…", fnt) > max_w:
-            s = s[:-1]
-        return s + "…"
-
     def _owner_project(self, c, run, fnt, max_w):
         owner = str(run.get("owner", "") or "").strip()
         project = str(run.get("project", "run") or "run").strip()
@@ -683,16 +701,10 @@ class OutcomeView(View):
         pairs = self._metric_pairs(run)
 
         # rotation badge (top-right) when cycling several finished runs
-        rot = run.get("_rotation")
-        right_edge = W - 10
-        try:
-            rc, rt = int(rot[0]), int(rot[1])
-        except (TypeError, ValueError, IndexError):
-            rc = rt = 0
-        if rt > 1:
-            badge = "▸ %d/%d" % (rc, rt)
+        badge = self._rotation_badge(run.get("_rotation"))
+        if badge:
             bw = c.textlen(badge, f_lbl)
-            c.text((right_edge - bw, 3), badge, f_lbl, DIM)
+            c.text((W - 10 - bw, 3), badge, f_lbl, DIM)
 
         # --- headline -------------------------------------------------------
         if failed:
@@ -762,5 +774,126 @@ class OutcomeView(View):
                 if tw > 0.55:
                     col = tuple(int(v * (0.5 + 0.5 * tw)) for v in GOOD)
                     c.sparkle(sx, sy, sr * (0.6 + 0.4 * tw), col)
+
+        return c.finish(blur=2)
+
+
+# ---------------------------------------------------------------------------
+class AgendaView(View):
+    """Agent agenda / to-do checklist. Renders ``ctx.agenda``:
+
+        {"owner", "title", "items": [{"task", "status"}], "_rotation"?}
+
+    as a header (owner · title + a ``done/total`` counter), a per-item list with
+    status glyphs (done=check, doing=spinner, todo=box), and a progress bar. When
+    the list is longer than ``VISIBLE`` rows it auto-scrolls a window over time so
+    every item is shown. Lets a human glance at what an agent has done / is doing /
+    has queued. Coexists with run dashboards in the manager's rotation."""
+
+    name = "agenda"
+
+    VISIBLE = 4            # item rows visible at once
+    ROW_H = 21            # px per item row
+    SCROLL_FRAMES = 26    # on-screen frames each scroll window is held
+    SPINNER = "◐◓◑◒"     # animated glyph for an in-progress item
+
+    def __init__(self):
+        # Scroll is driven by frames the agenda is actually ON SCREEN, not the
+        # global frame counter — otherwise rotation off/on (sharing the slot with
+        # runs) would make the window jump. Counted PER owner so several agendas
+        # alternating in the slot don't reset each other. render() is only called
+        # while this view is displayed.
+        self._scroll = {}      # owner -> on-screen frame count
+
+    def render(self, ctx):
+        ag = ctx.agenda or {}
+        f = ctx.frame
+        owner = str(ag.get("owner", "") or "").strip()
+        title = (str(ag.get("title", "") or "").strip()) or "agenda"
+        items = [it for it in (ag.get("items") or []) if isinstance(it, dict)]
+
+        tick = self._scroll.get(owner, 0) + 1
+        if len(self._scroll) > 64:         # bound memory; rare with few agents
+            self._scroll.clear()
+        self._scroll[owner] = tick
+
+        c = self._canvas(bg=(6, 8, 16))
+        c.gradient((6, 8, 18), (12, 14, 30))
+        c.grid(step=24, offset=f % 24, color=(12, 16, 34))
+
+        f_lbl = font(10, bold=True)
+        f_sm = font(11, bold=False)
+        f_item = font(15, bold=True)
+
+        total = len(items)
+        done = sum(1 for it in items if it.get("status") == "done")
+
+        # --- header: rotation badge + done/total counter (right) -----------
+        right_edge = W - 8
+        badge = self._rotation_badge(ag.get("_rotation"))
+        if badge:
+            bw = c.textlen(badge, f_lbl)
+            c.text((right_edge - bw, 2), badge, f_lbl, DIM)
+            right_edge -= int(bw) + 8
+
+        count = "%d/%d" % (done, total)
+        count_col = GOOD if total and done == total else ACCENT
+        cw = c.textlen(count, f_item)
+        c.text((right_edge - cw, 1), count, f_item, count_col, glow=True)
+        header_right = right_edge - int(cw) - 10
+
+        # owner · title (left), truncated to whatever room is left
+        hx = 8
+        if owner:
+            otag = owner[:OWNER_TAG_MAX]
+            c.text((hx, 3), otag, f_sm, ACCENT)
+            hx += int(c.textlen(otag, f_sm))
+            sep = " · "
+            c.text((hx, 3), sep, f_sm, DIM)
+            hx += int(c.textlen(sep, f_sm))
+        c.text((hx, 3), self._trunc(c, title, f_sm, header_right - hx), f_sm, WHITE)
+
+        c.line([(8, 19), (W - 8, 19)], (30, 40, 64), 1)
+
+        # --- empty agenda --------------------------------------------------
+        if not items:
+            msg = "no items"
+            mw = c.textlen(msg, f_item)
+            c.text(((W - mw) / 2, 54), msg, f_item, DIM)
+            return c.finish(blur=2)
+
+        # --- item list (auto-scrolling window) -----------------------------
+        if total > self.VISIBLE:
+            steps = total - self.VISIBLE + 1            # window start positions
+            start = (tick // self.SCROLL_FRAMES) % steps
+        else:
+            start = 0
+        window = items[start:start + self.VISIBLE]
+
+        for i, it in enumerate(window):
+            status = it.get("status", "todo")
+            if status not in ("done", "doing", "todo"):
+                status = "todo"
+            y = 25 + i * self.ROW_H
+            if status == "doing":
+                glyph = self.SPINNER[(f // 4) % len(self.SPINNER)]
+                gcol, tcol = ACCENT, WHITE
+            elif status == "done":
+                glyph, gcol, tcol = "✓", GOOD, DIM
+            else:
+                glyph, gcol, tcol = "▢", DIM, WHITE
+            c.text((10, y), glyph, f_item, gcol, glow=(status == "doing"))
+
+            # task text, truncated with an ellipsis to fit the row
+            tx = 32
+            shown = self._trunc(c, it.get("task", "") or "", f_item, W - 12 - tx)
+            c.text((tx, y), shown, f_item, tcol)
+            if status == "done":                        # strike-through completed
+                sw = c.textlen(shown, f_item)
+                c.line([(tx, y + 9), (tx + sw, y + 9)], (90, 140, 110), 1)
+
+        # --- progress bar (bottom) -----------------------------------------
+        frac = (done / total) if total else 0.0
+        c.bar([8, H - 8, W - 8, H - 3], frac, GOOD, outline=(30, 44, 60))
 
         return c.finish(blur=2)
