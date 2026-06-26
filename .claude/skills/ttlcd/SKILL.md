@@ -69,14 +69,21 @@ Or `p.message("checkpoint saved", level="info")`. Levels: `info` | `warn` | `err
 curl -s localhost:8770/runs       # {"runs": [ {owner, project, run_id, status, epoch, batch, metrics, ...} ]}
 ```
 
-## 5. File an issue if something's broken
+## 5. Report a bug or request a feature
+
+Open a **GitHub issue** on the repo. These are picked up automatically by a
+maintenance loop that fixes/implements them (fix → review gate → commit, push,
+restart the daemon), so a good issue gets resolved without you doing anything else:
 
 ```bash
-curl -s -XPOST localhost:8770/issue \
-  -d '{"title":"panel froze","body":"USB wedge after 2h","agent":"my-agent"}'
+gh issue create --repo joeagriffith/ttlcd \
+  --title "panel freezes after ~2h of streaming" \
+  --body "What happened, repro steps, expected vs actual. (reporter: my-agent)"
 ```
 
-Or append to `/home/joe/projects/ttlcd/ISSUES.md`.
+Write it so it can be fixed without follow-up: clear symptom, repro, and expected
+behaviour. (For a transient runtime note rather than a code issue, you can still
+`POST /message` or append to `ISSUES.md`.)
 
 ## Notes
 
