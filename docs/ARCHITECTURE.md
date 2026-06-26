@@ -205,6 +205,13 @@ deliberate and load-bearing.
   single-process** — only the daemon may drive the panel. `setup()` calls
   `_reset_globals()`, and `stop()` *joins* every thread before returning so no
   stale thread mutates the globals after a fresh connect resets them.
+- **Write-health counter.** `USBControl.write()` tracks `GLOBAL_WRITE_FAILS`,
+  the count of *consecutive* failed frame-packet writes: every success resets it
+  to 0, every failure increments it. `writes_healthy()` is True while it stays
+  below `MAX_WRITE_FAILS` (30). This detects a "write-failure wedge" — the device
+  stays enumerated and the threads keep running, but every frame write is
+  rejected — which the init globals alone cannot see. `_reset_globals()` clears
+  it on each fresh connect.
 - **`dev.reset()` is forbidden.** On this panel, pyusb's `dev.reset()` drops the
   device off the bus and it will not re-enumerate without a physical replug. To
   clear a wedged-but-present device, `reset_usb()` issues the `USBDEVFS_RESET`
@@ -216,8 +223,9 @@ deliberate and load-bearing.
   - *Disconnect* — when the device is absent from the bus it logs once and waits
     quietly, reconnecting the moment it reappears.
   - *Wedge* — present but not streaming: `stop()` the old driver, `reset_usb()`
-    to clear the wedge, then reconnect. `is_streaming()` checks `GLOBAL_RUNNING`
-    plus a live `Main` thread; `status()` maps this to `running` / `down` /
+    to clear the wedge, then reconnect. `is_streaming()` checks `GLOBAL_RUNNING`,
+    a live `Main` thread, *and* `writes_healthy()` (so a write-failure wedge is
+    treated as down and recovered); `status()` maps this to `running` / `down` /
     `disconnected` for `GET /health`.
 
 ## Extending it: adding a view

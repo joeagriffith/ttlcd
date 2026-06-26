@@ -77,7 +77,10 @@ class PanelService:
         if not self.driver or not driver_mod.GLOBAL_RUNNING:
             return False
         main = next((t for t in self.driver._threads if t.__class__.__name__ == "Main"), None)
-        return main is not None and main.is_alive()
+        # A write-failure wedge (device enumerated but rejecting every frame
+        # write) keeps GLOBAL_RUNNING True and Main alive, so also require that
+        # frame writes are still landing — otherwise the supervisor never recovers.
+        return main is not None and main.is_alive() and driver_mod.writes_healthy()
 
     def status(self):
         if self.is_streaming():

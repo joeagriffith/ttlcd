@@ -36,13 +36,29 @@ GLOBAL_INIT_LOCK = 0
 MAX_GLOBAL_INIT = 13
 GLOBAL_STAT = False
 GLOBAL_RUNNING = False
+# Consecutive failed frame-packet writes (see USBControl.write). A wedged panel
+# stays enumerated but rejects every write, so this climbs fast; a healthy panel
+# zeroes it on every successful packet, so it never accumulates.
+GLOBAL_WRITE_FAILS = 0
+
+# A single dead frame is ~36 packets, so any value below that trips within one
+# wedged frame while staying immune to a lone transient failure. 30 is a safe
+# margin: a wedge (every packet fails) crosses it inside ~1-2 dead frames, and a
+# healthy panel can never reach it because each success resets the counter to 0.
+MAX_WRITE_FAILS = 30
+
+
+def writes_healthy():
+    """True while frame writes are succeeding (not a write-failure wedge)."""
+    return GLOBAL_WRITE_FAILS < MAX_WRITE_FAILS
 
 
 def _reset_globals():
-    global GLOBAL_INIT_LOCK, GLOBAL_STAT, GLOBAL_RUNNING
+    global GLOBAL_INIT_LOCK, GLOBAL_STAT, GLOBAL_RUNNING, GLOBAL_WRITE_FAILS
     GLOBAL_INIT_LOCK = 0
     GLOBAL_STAT = False
     GLOBAL_RUNNING = False
+    GLOBAL_WRITE_FAILS = 0
 
 
 class USBControl:
@@ -64,11 +80,14 @@ class USBControl:
             self.lock.release()
 
     def write(self, data=b""):
+        global GLOBAL_WRITE_FAILS
         try:
             self.lock.acquire()
             self.endpoint.write(data)
+            GLOBAL_WRITE_FAILS = 0
         except Exception:
             self.logger.warning("Failed to write endpoint %s", self.endpoint)
+            GLOBAL_WRITE_FAILS += 1
         finally:
             self.lock.release()
 

@@ -62,8 +62,10 @@ def log():
 @pytest.fixture(autouse=True)
 def restore_globals():
     saved = driver_mod.GLOBAL_RUNNING
+    saved_fails = driver_mod.GLOBAL_WRITE_FAILS
     yield
     driver_mod.GLOBAL_RUNNING = saved
+    driver_mod.GLOBAL_WRITE_FAILS = saved_fails
 
 
 def _service(log, monkeypatch, present, fake_driver):
@@ -161,6 +163,26 @@ def test_is_streaming_false_when_main_dead(log, monkeypatch):
     assert svc.is_streaming() is False
 
 
+def test_is_streaming_false_on_write_failure_wedge(log, monkeypatch):
+    """Regression: device enumerated, GLOBAL_RUNNING True, Main alive, but frame
+    writes are all failing -> is_streaming() False so the supervisor recovers."""
+    present = {"v": True}
+    fake = FakeDriver(with_main=True, main_alive=True)
+    svc = _service(log, monkeypatch, present, fake)
+    svc.driver = fake
+    driver_mod.GLOBAL_RUNNING = True
+
+    # healthy: writes landing -> running
+    driver_mod.GLOBAL_WRITE_FAILS = 0
+    assert svc.is_streaming() is True
+    assert svc.status() == "running"
+
+    # wedge: every frame write failing -> not streaming, device still present
+    driver_mod.GLOBAL_WRITE_FAILS = driver_mod.MAX_WRITE_FAILS
+    assert svc.is_streaming() is False
+    assert svc.status() == "down"
+
+
 def test_is_streaming_false_without_main_thread(log, monkeypatch):
     present = {"v": True}
     fake = FakeDriver(with_main=False)
@@ -207,3 +229,34 @@ def test_stop_sets_running_false_and_stops_driver(log, monkeypatch):
     svc.stop()
     assert svc._running is False
     assert fake.stop_called >= 1
+
+
+# ------------------------------------------------ driver write-fail counter
+
+class _FailingEndpoint:
+    def write(self, data):
+        raise OSError("device wedged")
+
+
+class _OkEndpoint:
+    def write(self, data):
+        return len(data)
+
+
+def test_write_counter_increments_on_failure_resets_on_success(log):
+    """USBControl.write bumps GLOBAL_WRITE_FAILS on failure and zeroes it on a
+    successful write, flipping writes_healthy() back True."""
+    driver_mod.GLOBAL_WRITE_FAILS = 0
+
+    bad = driver_mod.USBControl(dev=object(), logger=log, endpoint=_FailingEndpoint())
+    for i in range(1, driver_mod.MAX_WRITE_FAILS + 1):
+        bad.write(b"frame")
+        assert driver_mod.GLOBAL_WRITE_FAILS == i
+    # enough consecutive failures => not healthy (a wedge)
+    assert driver_mod.writes_healthy() is False
+
+    # a single successful write resets the counter and clears the wedge flag
+    good = driver_mod.USBControl(dev=object(), logger=log, endpoint=_OkEndpoint())
+    good.write(b"frame")
+    assert driver_mod.GLOBAL_WRITE_FAILS == 0
+    assert driver_mod.writes_healthy() is True
